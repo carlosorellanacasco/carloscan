@@ -13,6 +13,8 @@ python -m http.server 8766 --directory app
 Abrir http://localhost:8766
 
 ## Publicar una actualización
+Commit en `main` y luego `./publicar.sh` (sube `app/` a la rama `gh-pages`).
+
 Cambiar `VERSION` en `app/sw.js` solo si cambian archivos de `app/vendor/` (el resto se actualiza solo: red primero).
 
 ## Reglas de coincidencia

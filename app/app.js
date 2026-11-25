@@ -46,6 +46,12 @@ const I18N = {
     orderSwitch:'Abrir', confirmNewOrder:'¿Empezar una orden nueva? La actual queda guardada.', lines:'líneas',
     extraRow:'Código {0} escaneado {1} vez/veces', reviewExtra:'Marcar revisado', reviewedExtra:'Revisado',
     dupLine:'Ese código ya está en la página {0}. ¿Agregarlo de todas formas?',
+    draftFlagged:'⚠ {0} renglón(es) en amarillo: el lector no está seguro. Compara con la hoja; para el código toca 📷 y escanea el código de barras impreso junto al artículo.',
+    tapZoom:'Toca la foto para ampliarla y compara cantidad por cantidad.',
+    draftMissing:'⚠ Parece que {0} artículo(s) de esta página no se leyeron. Cuenta los renglones de la hoja y agrega los que falten con "+ Renglón".',
+    draftNoPage:'⚠ No pude leer el número de página. Revisa la columna "Pág." de cada renglón.',
+    scanPaper:'Escanear código de la hoja', scanPaperHint:'Apunta al código de barras del artículo en el pick list.',
+    flaggedConfirm:'Quedan {0} renglón(es) en amarillo sin revisar. ¿Guardar de todas formas?', skippedDup:'{0} línea(s) ya estaban guardadas (mismo Pick ID) y no se duplicaron.',
   },
   en: {
     tOrder:'Order', tScan:'Scan', tReview:'Review', tLib:'Library', tSettings:'Settings',
@@ -90,6 +96,12 @@ const I18N = {
     orderSwitch:'Open', confirmNewOrder:'Start a new order? The current one stays saved.', lines:'lines',
     extraRow:'Code {0} scanned {1} time(s)', reviewExtra:'Mark reviewed', reviewedExtra:'Reviewed',
     dupLine:'That code is already on page {0}. Add it anyway?',
+    draftFlagged:'⚠ {0} yellow row(s): the reader is unsure. Compare with the paper; for the code tap 📷 and scan the barcode printed next to the item.',
+    tapZoom:'Tap the photo to enlarge it and compare quantity by quantity.',
+    draftMissing:'⚠ It looks like {0} item(s) on this page were not read. Count the rows on the paper and add missing ones with "+ Row".',
+    draftNoPage:'⚠ Could not read the page number. Check the "Pg." column of each row.',
+    scanPaper:'Scan barcode on paper', scanPaperHint:'Point at the item barcode on the pick list.',
+    flaggedConfirm:'{0} yellow row(s) not reviewed. Save anyway?', skippedDup:'{0} line(s) were already saved (same Pick ID) and were not duplicated.',
   }
 };
 let lang = 'es';
@@ -416,9 +428,9 @@ function ocrProgress(m) {
 
 async function prepImage(file) {
   const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => createImageBitmap(file));
-  const maxSide = 2400, s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
-  const up = Math.max(bmp.width, bmp.height) < 1400 ? 1.6 : 1; // fotos pequeñas: agrandar ayuda a Tesseract
-  const w = Math.round(bmp.width * s * up), h = Math.round(bmp.height * s * up);
+  // Tesseract lee mejor letras de ~30 px: llevar el lado largo a ~3200 px (agranda fotos comprimidas, achica las enormes)
+  const k = Math.min(2.5, 3200 / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * k), h = Math.round(bmp.height * k);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bmp, 0, 0, w, h);
   const img = ctx.getImageData(0, 0, w, h), d = img.data, hist = new Uint32Array(256);
@@ -437,11 +449,15 @@ async function runOcr(file) {
   if (!file) return;
   try {
     ocrProgress({ status: 'loading', progress: 0 });
+    const img = $('#draftImg'); if (img.src) URL.revokeObjectURL(img.src);
+    img.src = URL.createObjectURL(file); img.classList.remove('hidden', 'zoom');
     const canvas = await prepImage(file);
     const w = await getOcr();
-    const { data } = await w.recognize(canvas);
+    const { data } = await w.recognize(canvas, {}, { text: true, blocks: true });
     $('#ocrRaw').value = data.text; $('#ocrRawBox').classList.remove('hidden');
-    const rows = parseInvoice(data.text, parseInt($('#ocrPage').value, 10) || 1);
+    lastOcrLines = ocrLines(data);
+    const rows = parseAny(data.text, lastOcrLines, parseInt($('#ocrPage').value, 10) || 1);
+    draftNotes = { missing: rows.missing || 0, noPage: rows.pageFound === false };
     setDraft(rows);
     toast(rows.length ? t('ocrDone', rows.length) : t('ocrNone'), rows.length ? 'ok' : 'warn');
   } catch (e) {
@@ -449,6 +465,99 @@ async function runOcr(file) {
   } finally {
     $('#ocrProgress').classList.add('hidden');
   }
+}
+
+/* ---- Oracle "Move Order Pick List" ---- */
+let lastOcrLines = null;
+function ocrLines(data) {
+  const out = [];
+  (data.blocks || []).forEach((b) => (b.paragraphs || []).forEach((p) => (p.lines || []).forEach((l) => {
+    out.push({ text: (l.text || '').replace(/\n/g, ' ').trim(), words: (l.words || []).map((w) => ({ text: w.text, conf: w.confidence })) });
+  })));
+  return out.length ? out : null;
+}
+function parseAny(text, lines, page) {
+  if (/pick\s*(list|slip)|move\s*order|IAD\d{3}/i.test(text)) {
+    const rows = parseOracle(lines || text.split(/\r?\n/).map((t) => ({ text: t, words: [] })), page);
+    if (rows.length) return rows;
+  }
+  return parseInvoice(text, page);
+}
+// Repara lecturas típicas de dígitos: el artículo Oracle es 7 dígitos y empieza con 8.
+const DIGIT_FIX = { O: '0', o: '0', D: '0', Q: '0', U: '0', I: '1', l: '1', i: '1', '|': '1', '!': '1', Z: '2', z: '2', S: '5', s: '5', G: '6', b: '6', T: '7', B: '8', a: '8', g: '9', q: '9' };
+function fixDigits(tok) { return [...tok].map((c) => (/\d/.test(c) ? c : DIGIT_FIX[c] ?? c)).join(''); }
+function repairItem(tok) {
+  let t = fixDigits(tok.replace(/[^A-Za-z0-9|!]/g, ''));
+  let repaired = t !== tok;
+  if (t.length === 7 && /^\d{7}$/.test(t) && t[0] !== '8' && /[53a&sS6]/.test(tok[0])) { t = '8' + t.slice(1); repaired = true; }
+  return { code: t, valid: /^8\d{6}$/.test(t), repaired };
+}
+const LOCATOR = /^[|lI1]?AD\S*\d\.\d|^IAD|^[A-Z]{1,2}\d{2}-?$|^\d{2}$|^[A-Z]\d{2}$|packing/i;
+function parseOracle(lines, fallbackPage) {
+  const all = lines.map((l) => l.text).join('\n');
+  // Página y totales del encabezado
+  const pm = all.match(/page\s*(\d{1,2})\s*(?:of|0f|ot)\s*(\d{1,2})/i) || all.match(/slip\s*page\D{0,3}(\d{1,2})\s*[/\\l1|]\s*(\d{2})/i);
+  const page = pm ? +pm[1] : fallbackPage;
+  if (pm && order && !order.totalPages && +pm[2] < 100) { order.totalPages = +pm[2]; $('#totalPages').value = pm[2]; saveOrder(); }
+  const sm = all.match(/pick\s*s\S{0,3}p\D{0,6}(\d{8})/i);
+  if (sm && order && !order.orderNo) { order.orderNo = sm[1]; $('#orderNo').value = sm[1]; saveOrder(); }
+  if (pm) $('#ocrPage').value = page;
+
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    const tk = lines[i].text.split(/\s+/).filter(Boolean);
+    let ui = tk.findIndex((x, j) => j > 0 && /^[£E€F][AaN4]\.?$|^(EA|ea|Ea|eA|FA|EN|PC|FT|CS)\.?$/.test(x) && x.length <= 3);
+    if (ui < 0) {
+      // Sin "EA" legible: anclar en la subinventario (IAD501PROJ / IAD501STG) y tomar el número que sigue
+      const si = tk.map((x) => /ST[GC6]|PRO[JY]/i.test(x)).lastIndexOf(true);
+      if (si < 0) continue;
+      ui = tk.findIndex((x, j) => j > si && /^\d/.test(x)) - 1;
+      if (ui < si) continue;
+    }
+    // artículo: primer token de 6-8 caracteres "casi numérico" antes de la unidad
+    let item = null, itemTok = null;
+    for (let j = 0; j < ui; j++) {
+      const raw = tk[j].replace(/[^A-Za-z0-9|!&]/g, '');
+      if (raw.length >= 6 && raw.length <= 8 && (raw.match(/\d/g) || []).length >= 4) { item = repairItem(raw); itemTok = tk[j]; break; }
+    }
+    if (!item) continue;
+    const qTok = tk[ui + 1] || '';
+    const qm = qTok.replace(/[oO]/g, '0').match(/^(\d{1,3}(?:[,.]\d{3})+|\d+)$/);
+    const qty = qm ? parseInt(qm[1].replace(/[,.]/g, ''), 10) : NaN;
+    const confOf = (tok) => (lines[i].words.find((w) => w.text === tok) || {}).conf;
+    const wordConf = confOf(itemTok), qtyConf = confOf(qTok);
+    // siguientes renglones: Pick ID (9 dígitos) + descripción + ubicación
+    let pickId = '', desc = [], locator = '';
+    for (let k = i + 1; k < Math.min(lines.length, i + 7); k++) {
+      const t = lines[k].text;
+      if (/serial|numbers|^open\b/i.test(t) || (/ST[GC6]|PRO[JY]/i.test(t) && k > i + 1)) break;
+      const ws = t.split(/\s+/).filter(Boolean);
+      // La descripción empieza en el renglón del Pick ID; lo anterior es el código de barras leído como texto.
+      let started = !!pickId;
+      ws.forEach((w, idx) => {
+        const d = fixDigits(w.replace(/[^A-Za-z0-9|]/g, ''));
+        if (!pickId && /^\d{8,9}$/.test(d) && idx < 4) { pickId = d.length === 8 ? '1' + d : d; desc = []; started = true; return; }
+        if (/AD\S*\.\d|IAD/i.test(w)) { locator = w.replace(/^[|l1]/, 'I'); return; }
+        if (!started || LOCATOR.test(w) || /^[-—~=]+$/.test(w)) return;
+        desc.push(w);
+      });
+    }
+    // Sin Pick ID (descripción en la página siguiente): no inventar texto
+    if (!pickId) desc = [];
+    // Número partido ("4 80" en vez de 480) o cantidad poco legible → revisar
+    const split = /^\d{1,3}$/.test(tk[ui + 2] || '');
+    const qtyBad = !Number.isFinite(qty) || qty === 0 || split || (qtyConf !== undefined && qtyConf < 85);
+    rows.push({
+      page, code: item.code, qty: Number.isFinite(qty) ? qty : 0, desc: desc.join(' ').replace(/\s+,/g, ',').slice(0, 140),
+      pickId, locator, guessQty: qtyBad,
+      flag: !item.valid || item.repaired || (wordConf !== undefined && wordConf < 88)
+    });
+  }
+  // Cada artículo empieza con "Open": si hay más "Open" que renglones leídos, se saltó alguno.
+  const opens = lines.filter((l) => /^\W{0,3}(open|oen|opon|0pen|oren)\b/i.test(l.text.trim())).length;
+  rows.missing = Math.max(0, opens - rows.length);
+  rows.pageFound = !!pm;
+  return rows;
 }
 
 const UOM = /^(EA|EACH|PC|PCS|PCE|FT|M|RL|ROLL|BX|BOX|CS|CASE|PK|PKG|LOT|SET|KIT|C|M)$/i;
@@ -488,18 +597,53 @@ function parseInvoice(text, page) {
   return rows;
 }
 
-let draft = [];
-function setDraft(rows) { draft = rows; renderDraft(); }
+let draft = [], draftNotes = {};
+function setDraft(rows) { draft = [...rows]; if (!rows.length) draftNotes = {}; renderDraft(); }
 function renderDraft() {
   $('#draftBox').classList.toggle('hidden', !draft.length);
-  $('#draftRows').innerHTML = draft.map((r, i) => `
-    <div class="draft" data-i="${i}">
+  const flagged = draft.filter((r) => r.flag || r.guessQty).length;
+  const notes = (draftNotes.missing ? `<p class="warn">${t('draftMissing', draftNotes.missing)}</p>` : '') +
+    (draftNotes.noPage ? `<p class="warn">${t('draftNoPage')}</p>` : '') +
+    (flagged ? `<p class="warn">${t('draftFlagged', flagged)}</p>` : '');
+  $('#draftRows').innerHTML = notes + draft.map((r, i) => `
+    <div class="draft ${r.flag || r.guessQty ? 'flag' : ''}" data-i="${i}">
       <input data-f="page" type="number" min="1" value="${esc(r.page)}" aria-label="${t('page')}">
-      <input data-f="code" value="${esc(r.code)}" aria-label="${t('code')}" autocapitalize="characters">
-      <input data-f="qty" type="number" min="0" value="${esc(r.qty)}" aria-label="${t('qty')}" ${r.guessQty ? 'style="border-color:var(--warn)"' : ''}>
+      <input data-f="code" value="${esc(r.code)}" aria-label="${t('code')}" autocapitalize="characters" ${r.flag ? 'class="warnf"' : ''}>
+      <input data-f="qty" type="number" min="0" value="${esc(r.qty)}" aria-label="${t('qty')}" ${r.guessQty ? 'class="warnf"' : ''}>
       <button class="btn bad x" data-del="${i}" aria-label="${t('del')}">✕</button>
-      <span></span><input class="desc" data-f="desc" value="${esc(r.desc)}" aria-label="${t('desc')}">
+      <button class="btn x" data-scanrow="${i}" aria-label="${t('scanPaper')}" title="${t('scanPaper')}">📷</button>
+      <input class="desc" data-f="desc" value="${esc(r.desc)}" aria-label="${t('desc')}">
+      ${r.pickId || r.locator ? `<span class="s small muted desc">ID ${esc(r.pickId || '—')} · ${esc(r.locator || '')}</span>` : ''}
     </div>`).join('');
+}
+
+/* Escanear un solo código (para corregir renglones leyendo el código de barras de la hoja) */
+async function scanOnce() {
+  stopCamera();
+  const d = document.createElement('dialog');
+  d.innerHTML = `<div class="video-wrap"><video playsinline muted></video><div class="aim"></div></div><p class="small muted">${t('scanPaperHint')}</p><button class="btn ghost" value="x">${t('cancel')}</button>`;
+  document.body.appendChild(d); d.showModal();
+  const v = d.querySelector('video'); let s, done = false, result = null;
+  d.querySelector('button').onclick = () => { done = true; };
+  d.addEventListener('close', () => { done = true; });
+  try {
+    await getDetector();
+    s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+    v.srcObject = s; await v.play();
+    const cv = document.createElement('canvas');
+    while (!done) {
+      if (v.videoWidth) {
+        const vw = v.videoWidth, vh = v.videoHeight; cv.width = vw * 0.9; cv.height = vh * 0.4;
+        cv.getContext('2d').drawImage(v, vw * 0.05, vh * 0.3, cv.width, cv.height, 0, 0, cv.width, cv.height);
+        const codes = await detector.detect(cv).catch(() => []);
+        if (codes.length && codes[0].rawValue) { result = codes[0].rawValue.trim(); feedback('ok'); break; }
+      }
+      await sleep(120);
+    }
+  } catch (e) { toast(t('camError', e.message || e.name), 'bad'); }
+  if (s) s.getTracks().forEach((tr) => tr.stop());
+  if (d.open) d.close(); d.remove();
+  return result;
 }
 
 /* ---------------- render ---------------- */
@@ -531,6 +675,7 @@ function lineItem(l, mode) {
   return `<div class="item ${st}">${ph ? `<img class="thumb" loading="lazy" src="${ph}" alt="">` : ''}
     <div class="t"><span class="tag ${st}">${statusLabel(st)}</span>${esc(l.code)}</div>
     <div class="s">${t('page')} ${esc(l.page)} · ${esc(l.desc || p?.name || '')}</div>
+    ${l.pickId || l.locator ? `<div class="s">ID ${esc(l.pickId || '—')}${l.locator ? ' · 📍 ' + esc(l.locator) : ''}</div>` : ''}
     <div class="qty">${l.counted} / ${l.qty}</div>
     ${l.resolution ? `<div class="s">📝 ${esc(l.resolution.note)}</div>` : ''}
     <div class="r">${actions}</div></div>`;
@@ -793,18 +938,39 @@ function bind() {
 
   $('#ocrCam').onchange = (e) => { runOcr(e.target.files[0]); e.target.value = ''; };
   $('#ocrFile').onchange = (e) => { runOcr(e.target.files[0]); e.target.value = ''; };
-  $('#reparseBtn').onclick = () => setDraft(parseInvoice($('#ocrRaw').value, parseInt($('#ocrPage').value, 10) || 1));
-  $('#draftRows').oninput = (e) => { const row = e.target.closest('.draft'); if (!row) return; const r = draft[+row.dataset.i]; const f = e.target.dataset.f; r[f] = f === 'page' || f === 'qty' ? parseInt(e.target.value, 10) || 0 : e.target.value; if (f === 'qty') r.guessQty = false; };
-  $('#draftRows').onclick = (e) => { const i = e.target.dataset.del; if (i !== undefined) { draft.splice(+i, 1); renderDraft(); } };
+  $('#draftImg').onclick = (e) => e.target.classList.toggle('zoom');
+  $('#reparseBtn').onclick = () => setDraft(parseAny($('#ocrRaw').value, null, parseInt($('#ocrPage').value, 10) || 1));
+  $('#draftRows').oninput = (e) => {
+    const row = e.target.closest('.draft'); if (!row || !e.target.dataset.f) return; const r = draft[+row.dataset.i]; const f = e.target.dataset.f;
+    r[f] = f === 'page' || f === 'qty' ? parseInt(e.target.value, 10) || 0 : e.target.value;
+    if (f === 'qty') r.guessQty = false; if (f === 'code') r.flag = false;
+    e.target.classList.remove('warnf'); if (!r.flag && !r.guessQty) row.classList.remove('flag');
+  };
+  $('#draftRows').onclick = async (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.del !== undefined) { draft.splice(+b.dataset.del, 1); renderDraft(); }
+    if (b.dataset.scanrow !== undefined) {
+      const r = draft[+b.dataset.scanrow]; const code = await scanOnce();
+      if (code) { r.code = code; r.flag = false; renderDraft(); toast(code, 'ok'); }
+    }
+  };
   $('#draftAddBtn').onclick = () => { draft.push({ page: parseInt($('#ocrPage').value, 10) || 1, code: '', qty: 1, desc: '' }); renderDraft(); };
   $('#draftClearBtn').onclick = () => { setDraft([]); $('#ocrRawBox').classList.add('hidden'); };
   $('#draftSaveBtn').onclick = () => {
     const rows = draft.filter((r) => String(r.code).trim());
+    const pending = rows.filter((r) => r.flag || r.guessQty).length;
+    if (pending && !confirm(t('flaggedConfirm', pending))) return;
+    let skipped = 0;
     for (const r of rows) {
-      const dup = order.lines.find((l) => norm(l.code) === norm(r.code) && l.page === r.page);
-      if (dup && !confirm(t('dupLine', dup.page))) continue;
-      order.lines.push({ id: 'l-' + uid(), page: r.page || 1, code: String(r.code).trim(), desc: String(r.desc || '').trim(), qty: Math.max(0, r.qty || 0), counted: 0, resolution: null });
+      // Misma línea Oracle (Pick ID) ya guardada: foto repetida de la página → no duplicar
+      if (r.pickId && order.lines.some((l) => l.pickId === r.pickId)) { skipped++; continue; }
+      if (!r.pickId) {
+        const dup = order.lines.find((l) => norm(l.code) === norm(r.code) && +l.page === +r.page && l.qty === r.qty && !l.pickId);
+        if (dup && !confirm(t('dupLine', dup.page))) continue;
+      }
+      order.lines.push({ id: 'l-' + uid(), page: r.page || 1, code: String(r.code).trim(), desc: String(r.desc || '').trim(), qty: Math.max(0, r.qty || 0), counted: 0, resolution: null, pickId: r.pickId || '', locator: r.locator || '' });
     }
+    if (skipped) toast(t('skippedDup', skipped), 'warn');
     setDraft([]); $('#ocrRawBox').classList.add('hidden'); saveOrder(); renderAll(); toast(t('saved'), 'ok');
   };
   $('#manualLineBtn').onclick = () => editLine(null);

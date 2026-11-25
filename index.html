@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b1220">
+<title>WESCAN NIGHT SHIFT</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <strong>WESCAN NIGHT SHIFT</strong>
+    <span id="orderBadge" class="muted small"></span>
+  </div>
+  <div class="status-row">
+    <span id="netPill" class="pill"></span>
+    <span id="storePill" class="pill"></span>
+    <select id="langSel" aria-label="Idioma / Language">
+      <option value="es">ES</option>
+      <option value="en">EN</option>
+    </select>
+  </div>
+  <div id="backupWarn" class="warn hidden"></div>
+</header>
+
+<main>
+  <!-- ORDEN -->
+  <section id="tab-order" class="tab">
+    <div class="card">
+      <h2 data-i18n="orderTitle"></h2>
+      <div class="grid2">
+        <label><span data-i18n="orderNo"></span><input id="orderNo" autocomplete="off" inputmode="text"></label>
+        <label><span data-i18n="totalPages"></span><input id="totalPages" type="number" min="1" inputmode="numeric"></label>
+      </div>
+      <div class="row">
+        <button id="newOrderBtn" class="btn ghost" data-i18n="newOrder"></button>
+        <button id="ordersBtn" class="btn ghost" data-i18n="savedOrders"></button>
+      </div>
+      <div id="ordersList" class="list hidden"></div>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="loadInvoice"></h2>
+      <p class="muted small" data-i18n="loadInvoiceHint"></p>
+      <label class="inline"><span data-i18n="invoicePage"></span><input id="ocrPage" type="number" min="1" value="1" inputmode="numeric"></label>
+      <div class="row">
+        <label class="btn primary file"><span data-i18n="takePhoto"></span><input id="ocrCam" type="file" accept="image/*" capture="environment" hidden></label>
+        <label class="btn file"><span data-i18n="choosePhoto"></span><input id="ocrFile" type="file" accept="image/*" hidden></label>
+      </div>
+      <div id="ocrProgress" class="progress hidden"><div></div><span></span></div>
+      <details id="ocrRawBox" class="hidden">
+        <summary data-i18n="ocrRaw"></summary>
+        <textarea id="ocrRaw" rows="8"></textarea>
+        <button id="reparseBtn" class="btn small" data-i18n="reparse"></button>
+      </details>
+      <div id="draftBox" class="hidden">
+        <h3 data-i18n="draftTitle"></h3>
+        <p class="muted small" data-i18n="draftHint"></p>
+        <div id="draftRows"></div>
+        <div class="row">
+          <button id="draftAddBtn" class="btn ghost" data-i18n="addRow"></button>
+          <button id="draftSaveBtn" class="btn primary" data-i18n="saveLines"></button>
+          <button id="draftClearBtn" class="btn ghost" data-i18n="discard"></button>
+        </div>
+      </div>
+      <button id="manualLineBtn" class="btn ghost" data-i18n="manualLine"></button>
+    </div>
+
+    <div class="card">
+      <h2 data-i18n="linesTitle"></h2>
+      <div id="linesSummary" class="muted small"></div>
+      <div id="linesList" class="list"></div>
+    </div>
+  </section>
+
+  <!-- ESCANEAR -->
+  <section id="tab-scan" class="tab hidden">
+    <div class="card">
+      <div class="video-wrap hidden" id="videoWrap">
+        <video id="video" playsinline muted></video>
+        <div class="aim"></div>
+        <button id="torchBtn" class="btn small torch hidden" data-i18n="torch"></button>
+      </div>
+      <div class="row">
+        <button id="camBtn" class="btn primary big" data-i18n="openCamera"></button>
+      </div>
+      <div class="row">
+        <input id="codeInput" placeholder="" autocomplete="off" autocapitalize="characters" enterkeyhint="search">
+        <button id="codeGo" class="btn" data-i18n="search"></button>
+      </div>
+      <label class="inline"><span data-i18n="qtyPerScan"></span><input id="qtyPerScan" type="number" min="1" value="1" inputmode="numeric"></label>
+    </div>
+    <div id="matchCard" class="card hidden"></div>
+    <div class="card">
+      <div class="row space"><h3 data-i18n="recentScans"></h3><button id="undoBtn" class="btn small ghost" data-i18n="undo"></button></div>
+      <div id="scanLog" class="list"></div>
+    </div>
+  </section>
+
+  <!-- REVISION -->
+  <section id="tab-review" class="tab hidden">
+    <div class="card">
+      <h2 data-i18n="reviewTitle"></h2>
+      <div id="reviewStats" class="stats"></div>
+      <div class="row">
+        <select id="reviewFilter">
+          <option value="open" data-i18n="fOpen"></option>
+          <option value="all" data-i18n="fAll"></option>
+          <option value="over" data-i18n="fOver"></option>
+          <option value="extra" data-i18n="fExtra"></option>
+        </select>
+      </div>
+    </div>
+    <div id="pagesBox" class="card"></div>
+    <div id="reviewList" class="list"></div>
+    <div class="card">
+      <div class="row">
+        <button id="finalizeBtn" class="btn primary big" data-i18n="finalize"></button>
+        <button id="csvBtn" class="btn ghost" data-i18n="exportCsv"></button>
+      </div>
+      <div id="finalizeMsg" class="muted small"></div>
+    </div>
+  </section>
+
+  <!-- BIBLIOTECA -->
+  <section id="tab-lib" class="tab hidden">
+    <div class="card">
+      <div class="row">
+        <input id="libSearch" type="search" autocomplete="off">
+        <button id="libNewBtn" class="btn primary" data-i18n="newProduct"></button>
+      </div>
+      <div id="libCount" class="muted small"></div>
+    </div>
+    <div id="libList" class="list"></div>
+  </section>
+
+  <!-- AJUSTES -->
+  <section id="tab-settings" class="tab hidden">
+    <div class="card">
+      <h2 data-i18n="backupTitle"></h2>
+      <p class="muted small" data-i18n="backupHint"></p>
+      <div class="row">
+        <button id="backupBtn" class="btn primary" data-i18n="backupNow"></button>
+        <label class="btn file"><span data-i18n="importBackup"></span><input id="importFile" type="file" accept="application/json,.json" hidden></label>
+      </div>
+      <div id="backupInfo" class="muted small"></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="offlineTitle"></h2>
+      <div id="offlineInfo" class="small"></div>
+      <div class="row"><button id="persistBtn" class="btn ghost" data-i18n="persistAsk"></button></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="aboutTitle"></h2>
+      <p class="small" data-i18n="aboutText"></p>
+      <p class="muted small">v2.0.0 · Tesseract.js 6 · ZXing (barcode-detector)</p>
+    </div>
+  </section>
+</main>
+
+<nav class="tabs">
+  <button data-tab="order" class="active"><span>📄</span><b data-i18n="tOrder"></b></button>
+  <button data-tab="scan"><span>📷</span><b data-i18n="tScan"></b></button>
+  <button data-tab="review"><span>✅</span><b data-i18n="tReview"></b></button>
+  <button data-tab="lib"><span>📦</span><b data-i18n="tLib"></b></button>
+  <button data-tab="settings"><span>⚙️</span><b data-i18n="tSettings"></b></button>
+</nav>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm"></form></dialog>
+<div id="toast" class="toast hidden"></div>
+
+<script src="vendor/barcode/barcode-ponyfill.js"></script>
+<script src="vendor/tesseract/tesseract.min.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>

@@ -8,7 +8,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-192.png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=2.1.0">
 </head>
 <body>
 <header class="top">
@@ -60,6 +60,8 @@
       <div id="draftBox" class="hidden">
         <h3 data-i18n="draftTitle"></h3>
         <p class="muted small" data-i18n="draftHint"></p>
+        <img id="draftImg" class="pagephoto hidden" alt="">
+        <p class="muted small" data-i18n="tapZoom"></p>
         <div id="draftRows"></div>
         <div class="row">
           <button id="draftAddBtn" class="btn ghost" data-i18n="addRow"></button>
@@ -157,7 +159,7 @@
     <div class="card">
       <h2 data-i18n="aboutTitle"></h2>
       <p class="small" data-i18n="aboutText"></p>
-      <p class="muted small">v2.0.0 · Tesseract.js 6 · ZXing (barcode-detector)</p>
+      <p class="muted small">v2.1.0 · Tesseract.js 6 · ZXing (barcode-detector)</p>
     </div>
   </section>
 </main>
@@ -175,6 +177,6 @@
 
 <script src="vendor/barcode/barcode-ponyfill.js"></script>
 <script src="vendor/tesseract/tesseract.min.js" defer></script>
-<script src="app.js" defer></script>
+<script src="app.js?v=2.1.0" defer></script>
 </body>
 </html>
